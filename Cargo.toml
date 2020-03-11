@@ -1,0 +1,10 @@
+[package]
+name = "scoped-tls-async"
+version = "0.1.0"
+publish = false
+authors = ["Yusuke Sasaki <yusuke.sasaki.nuem@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+scoped-tls = "1" # public dependency
+futures-core = "0.3"
