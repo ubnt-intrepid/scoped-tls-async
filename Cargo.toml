@@ -8,3 +8,6 @@ edition = "2018"
 [dependencies]
 scoped-tls = "1" # public dependency
 futures-core = "0.3"
+
+[dev-dependencies]
+futures = "0.3"

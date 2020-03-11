@@ -48,3 +48,99 @@ where
         }
     }
 }
+
+// copied from scoped-tls
+#[cfg(test)]
+mod tests {
+    use crate::{scoped_thread_local, ScopedKeyExt as _};
+    use futures::{
+        channel::oneshot::{channel, Sender},
+        executor::{block_on, LocalPool},
+        future::FutureExt as _,
+        task::LocalSpawnExt as _,
+    };
+    use std::{cell::Cell, panic::AssertUnwindSafe};
+
+    scoped_thread_local!(static FOO: u32);
+
+    #[test]
+    fn smoke() {
+        scoped_thread_local!(static BAR: u32);
+
+        block_on(async {
+            assert!(!BAR.is_set());
+            BAR.set_async(&1, async {
+                assert!(BAR.is_set());
+                BAR.with(|slot| {
+                    assert_eq!(*slot, 1);
+                });
+            })
+            .await;
+            assert!(!BAR.is_set());
+        });
+    }
+
+    #[test]
+    fn cell_allowed() {
+        scoped_thread_local!(static BAR: Cell<u32>);
+
+        block_on(async {
+            BAR.set_async(&Cell::new(1), async {
+                BAR.with(|slot| {
+                    assert_eq!(slot.get(), 1);
+                });
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn scope_item_allowed() {
+        block_on(async {
+            assert!(!FOO.is_set());
+            FOO.set_async(&1, async {
+                assert!(FOO.is_set());
+                FOO.with(|slot| {
+                    assert_eq!(*slot, 1);
+                });
+            })
+            .await;
+            assert!(!FOO.is_set());
+        });
+    }
+
+    #[test]
+    fn panic_resets() {
+        struct Check(Option<Sender<u32>>);
+        impl Drop for Check {
+            fn drop(&mut self) {
+                FOO.with(|r| {
+                    self.0.take().unwrap().send(*r).unwrap();
+                })
+            }
+        }
+
+        let mut pool = LocalPool::new();
+        let spawner = pool.spawner();
+
+        pool.run_until(async {
+            let (tx, rx) = channel();
+            let t = spawner
+                .spawn_local_with_handle(
+                    AssertUnwindSafe(async {
+                        FOO.set_async(&1, async {
+                            let _r = Check(Some(tx));
+
+                            FOO.set_async(&2, async { panic!() }).await;
+                        })
+                        .await;
+                    })
+                    .catch_unwind(),
+                )
+                .unwrap();
+
+            assert_eq!(rx.await.unwrap(), 1);
+            assert!(t.await.is_err());
+        });
+    }
+}
